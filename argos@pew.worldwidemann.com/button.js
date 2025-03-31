@@ -39,6 +39,7 @@ class ArgosButton extends PanelMenu.Button {
 
     this._updateTimeout = null;
     this._cycleTimeout = null;
+    this._stdoutStream = null;
 
     this.connect("destroy", this._onDestroy.bind(this));
 
@@ -57,6 +58,8 @@ class ArgosButton extends PanelMenu.Button {
   _onDestroy() {
     this._isDestroyed = true;
 
+    if (this._stdoutStream !== null)
+      this._stdoutStream.close(null);
     if (this._updateTimeout !== null)
       GLib.source_remove(this._updateTimeout);
     if (this._cycleTimeout !== null)
@@ -84,30 +87,43 @@ class ArgosButton extends PanelMenu.Button {
     envp.push("ARGOS_VERSION=2");
     envp.push("ARGOS_MENU_OPEN=" + (this.menu.isOpen ? "true" : "false"));
 
+    let finite = (this._updateInterval === null || this._updateInterval > 0);
     try {
-      Utilities.spawnWithCallback(null, [this._file.get_path()], envp, 0, null,
-        (standardOutput) => {
-          this._updateRunning = false;
-
-          if (this._isDestroyed)
-            return;
-
-          this._processOutput(standardOutput.split("\n"));
-
-          if (this._updateInterval !== null) {
-            this._updateTimeout =
-	      GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT,
-				       this._updateInterval,
-				       () => {
-					 this._updateTimeout = null;
-					 this._update();
-					 return false;
-				       });
-          }
-        });
+      if (finite || this._stdoutStream === null)
+        Utilities.spawnWithCallback(null, [this._file.get_path()], envp, 0, null, finite, 
+            this._acceptOutput.bind(this));
+      else
+        // option to update panel text only, like i3status
+        Utilities.readOutput(this._stdoutStream, false, 
+            this._acceptOutput.bind(this));
     } catch (error) {
       log("Unable to execute file '" + this._file.get_basename() + "': " + error);
       this._updateRunning = false;
+    }
+  }
+
+  _acceptOutput(standardOutput, stdoutStream) {
+    let finite = (this._updateInterval === null || this._updateInterval > 0);
+    this._updateRunning = false;
+
+    if (this._isDestroyed)
+      return;
+
+    if (this._stdoutStream !== stdoutStream)
+      this._stdoutStream = stdoutStream;
+
+    if (standardOutput.length > 0 || finite)
+      this._processOutput(standardOutput.split("\n"));
+
+    if (this._updateInterval !== null && finite) {
+      this._updateTimeout =
+      GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT,
+                this._updateInterval,
+                () => {
+                  this._updateTimeout = null;
+                  this._update();
+                  return false;
+                });
     }
   }
 

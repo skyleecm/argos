@@ -36,9 +36,13 @@ export function parseFilename(filename) {
   let updatePart = (nameParts.length >= 3) ? nameParts[nameParts.length - 2] : null;
   let positionPart = (nameParts.length >= 4) ? nameParts[nameParts.length - 3] : null;
 
-  if (updatePart !== null && updatePart.endsWith("+")) {
-    settings.updateOnOpen = true;
-    updatePart = updatePart.substring(0, updatePart.length - 1);
+  if (updatePart !== null) {
+    if (updatePart.endsWith("+")) {
+      settings.updateOnOpen = true;
+      updatePart = updatePart.substring(0, updatePart.length - 1);
+    } else if (updatePart.length == 1 && updatePart[0] == '~') {
+      settings.updateInterval = -1;
+    }
   }
 
   if (updatePart !== null && updatePart.length >= 2) {
@@ -247,7 +251,10 @@ export function ansiToMarkup(text) {
 // Combines the benefits of spawn_sync (easy retrieval of output)
 // with those of spawn_async (non-blocking execution).
 // Based on https://github.com/optimisme/gjs-examples/blob/master/assets/spawn.js.
-export function spawnWithCallback(workingDirectory, argv, envp, flags, childSetup, callback) {
+export function spawnWithCallback(workingDirectory, argv, envp, flags, childSetup, finite, callback) {
+  if (!finite)
+    flags = GLib.SpawnFlags.DO_NOT_REAP_CHILD;
+  
   let [success, pid, stdinFile, stdoutFile, stderrFile] = GLib.spawn_async_with_pipes(
     workingDirectory, argv, envp, flags, childSetup);
 
@@ -256,8 +263,13 @@ export function spawnWithCallback(workingDirectory, argv, envp, flags, childSetu
 
   GLib.close(stdinFile);
   GLib.close(stderrFile);
-
-  let standardOutput = "";
+  if (!finite) {
+    let wid = GLib.child_watch_add(GLib.PRIORITY_DEFAULT, pid,
+        function(pid, status) {
+          GLib.spawn_close_pid(pid);
+          GLib.source_remove(wid);
+        });
+  }
 
   let stdoutStream = new Gio.DataInputStream({
     base_stream: new Gio.UnixInputStream({
@@ -265,12 +277,20 @@ export function spawnWithCallback(workingDirectory, argv, envp, flags, childSetu
     })
   });
 
+  readOutput(stdoutStream, finite, callback);
+}
+
+export function readOutput(stdoutStream, finite, callback) {
+  let standardOutput = "";
   readStream(stdoutStream, function(output) {
     if (output === null) {
       stdoutStream.close(null);
-      callback(standardOutput);
-    } else {
+      callback(standardOutput, null);
+    } else if (finite) {
       standardOutput += output;
+    } else {
+      // option to update panel text only, like i3status
+      callback(output, stdoutStream);
     }
   });
 }
