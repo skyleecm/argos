@@ -268,6 +268,10 @@ export function spawnWithCallback(workingDirectory, argv, envp, flags, childSetu
         function(pid, status) {
           GLib.spawn_close_pid(pid);
           GLib.source_remove(wid);
+          if (GLib.spawn_check_exit_status(status))
+            callback(null, null);
+          else
+            log("Argos", argv[0] + " exit with error");
         });
   }
 

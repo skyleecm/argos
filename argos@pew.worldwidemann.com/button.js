@@ -112,6 +112,11 @@ class ArgosButton extends PanelMenu.Button {
     if (this._stdoutStream !== stdoutStream)
       this._stdoutStream = stdoutStream;
 
+    if (standardOutput === null && !finite) {
+      // auto restart if being killed
+      this._update();
+      return;
+    }
     if (standardOutput.length > 0 || finite)
       this._processOutput(standardOutput.split("\n"));
 
